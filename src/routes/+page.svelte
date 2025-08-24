@@ -11,7 +11,6 @@
   let conn;
   let receivedFileChunks = [];
   let receivedFileMetadata = null;
-  let offeredFileMetadata = null;
   let receivedSize = 0;
   let downloadUrl = null;
   let progress = 0;
@@ -64,38 +63,8 @@
       status = 'Peer connected!';
 
       // If we are in the sending state, this is the receiver we've been waiting for.
-      if (uiState === 'sending') {
-          // Offer the file if one is selected
-          if (file) {
-              offerFile();
-          }
-          // Listen for a request from the receiver
-          conn.on('data', (data) => {
-              if (data.type === 'file-request') {
-                  sendFile();
-              }
-          });
-      } else {
-          // If we are not in the sending state, the other peer connected to us,
-          // so we should be in the receiving state.
-          uiState = 'receiving';
-          conn.on('data', (data) => {
-            if (data.type === 'file-offer') {
-                receivedFileMetadata = data.payload;
-                status = `Incoming file offer`;
-                progress = 0;
-                downloadUrl = null;
-            } else if (data.constructor === ArrayBuffer) {
-                receivedFileChunks.push(data);
-                receivedSize += data.byteLength;
-                progress = Math.round((receivedSize / receivedFileMetadata.size) * 100);
-                if (receivedSize === receivedFileMetadata.size) {
-                    status = 'Download complete!';
-                    const blob = new Blob(receivedFileChunks, { type: receivedFileMetadata.type });
-                    downloadUrl = URL.createObjectURL(blob);
-                }
-            }
-          });
+      if (uiState === 'sending' && file) {
+          sendFile();
       }
     });
   });
@@ -120,24 +89,11 @@
     if (file) {
         uiState = 'sending';
         status = `File selected: ${file.name}`;
-        if (conn && conn.open) offerFile();
+        // If we are already connected, send the file right away
+        if (conn && conn.open) {
+            sendFile();
+        }
     }
-  }
-
-  function offerFile() {
-    if (!file || !conn) return;
-    offeredFileMetadata = { name: file.name, size: file.size, type: file.type };
-    conn.send({ type: 'file-offer', payload: offeredFileMetadata });
-    status = 'Waiting for receiver to accept...';
-  }
-
-  function requestFile() {
-    if (!conn || !receivedFileMetadata) return;
-    conn.send({ type: 'file-request' });
-    status = `Downloading ${receivedFileMetadata.name}...`;
-    receivedFileChunks = [];
-    receivedSize = 0;
-    progress = 0;
   }
 
   function startScanner() {
@@ -157,12 +113,15 @@
       status = 'Connection established!';
       // The data listener for the receiver is now set up here
       conn.on('data', (data) => {
-        if (data.type === 'file-offer') {
+        // The first message received will be the metadata
+        if (data.type === 'metadata') {
             receivedFileMetadata = data.payload;
-            status = `Incoming file offer`;
+            status = `Downloading: ${receivedFileMetadata.name}`;
             progress = 0;
             downloadUrl = null;
-        } else if (data.constructor === ArrayBuffer) {
+            receivedFileChunks = [];
+            receivedSize = 0;
+        } else { // Subsequent messages are file chunks
             receivedFileChunks.push(data);
             receivedSize += data.byteLength;
             progress = Math.round((receivedSize / receivedFileMetadata.size) * 100);
@@ -180,6 +139,17 @@
     if (!file || !conn) return;
     status = `Sending: ${file.name}`;
     progress = 0;
+
+    // Send metadata first
+    conn.send({
+        type: 'metadata',
+        payload: {
+            name: file.name,
+            size: file.size,
+            type: file.type,
+        }
+    });
+
     const fileReader = new FileReader();
     const chunkSize = 16 * 1024;
     let offset = 0;
@@ -288,15 +258,11 @@
                             </div>
                         {/if}
                         {#if receivedFileMetadata && !downloadUrl}
-                          <div class="text-slate-800 dark:text-slate-200">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-slate-400 dark:text-slate-500 mb-2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><line x1="10" x2="8" y1="9" y2="9"/></svg>
-                            <p class="font-bold text-lg">{receivedFileMetadata.name}</p>
-                            <p class="text-sm text-slate-500 dark:text-slate-400">{formatBytes(receivedFileMetadata.size)}</p>
-                            <button on:click={requestFile} class="mt-6 w-full max-w-xs inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg transition-all">
-                              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                              Accept & Download
-                            </button>
-                          </div>
+                            <div class="text-slate-500 dark:text-slate-400">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="mx-auto animate-pulse"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                                <p class="mt-2">Receiving file...</p>
+                                <p class="font-bold text-lg">{receivedFileMetadata.name}</p>
+                            </div>
                         {/if}
                         {#if downloadUrl}
                           <div class="text-slate-800 dark:text-slate-200">
