@@ -199,7 +199,7 @@
     </button>
 
     <header class="text-center mb-10" in:fly={{ y: -20, duration: 400, delay: 200 }} out:fade>
-        <h1 class="text-4xl md:text-5xl font-bold text-slate-900 dark:text-white">Breeze</h1>
+        <h1 class="text-4xl md:text-5xl font-bold text-slate-900 dark:text-white">Breeze <span class="text-indigo-600 dark:text-indigo-400 text-2xl align-middle">v2.0</span></h1>
         <p class="text-slate-500 dark:text-slate-400 mt-2 h-6">{status}</p>
     </header>
 
